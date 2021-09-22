@@ -1,0 +1,56 @@
+arch: "default"
+images:
+  - location: "https://cloud-images.ubuntu.com/hirsute/current/hirsute-server-cloudimg-amd64.img"
+    arch: "x86_64"
+  - location: "https://cloud-images.ubuntu.com/hirsute/current/hirsute-server-cloudimg-arm64.img"
+    arch: "aarch64"
+cpus: 4
+memory: "4GiB"
+disk: "50GiB"
+mounts:
+  - location: "~/playground"
+    writable: true
+  - location: "/tmp/lima"
+    writable: true
+ssh:
+  localPort: 60022
+  loadDotSSHPubKeys: false
+containerd:
+  system: false
+  user: false
+provision:
+  - mode: user
+    script: |
+      #!/bin/bash
+      set -eux -o pipefail
+      # Execute the installation only on first boot
+      if [ ! -f ~/get-docker.sh ]; then
+        # Install Docker with automatic script
+        curl -fsSL https://get.docker.com -o ~/get-docker.sh
+        sudo sh ~/get-docker.sh
+        # Grant lima user docker permission without sudo
+        sudo usermod -aG docker $USER
+        newgrp docker
+        # Enable the docker daemon to listen to tcp socket
+        sudo mkdir -p /etc/systemd/system/docker.service.d
+        printf "[Service]\nExecStart=\nExecStart=/usr/bin/dockerd -H fd:// -H tcp://0.0.0.0:2375 --containerd=/run/containerd/containerd.sock" | sudo tee /etc/systemd/system/docker.service.d/override.conf
+        sudo systemctl daemon-reload
+        sudo systemctl restart docker
+        # Configure Docker Host variable for lima user
+        echo 'export DOCKER_HOST="tcp://127.0.0.1:2375"' >> ~/.profile 
+      fi
+probes:
+  - mode: readiness
+    description: docker to be installed
+    script: |
+        #!/bin/bash
+        set -eux -o pipefail
+        if ! timeout 30s bash -c "until command -v docker; do sleep 3; done"; then
+          echo >&2 "docker is not installed yet"
+          exit 1
+        fi
+    hint: |
+      docker was not installed in the guest. Make sure the package system is working correctly.
+      Also see "~/.lima/docker/serial.log" in the guest.
+firmware:
+  legacyBIOS: false
